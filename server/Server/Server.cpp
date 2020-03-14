@@ -1,18 +1,13 @@
 // Server.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-
 #include <iostream>
-#include <winsock2.h>
 #include <ws2tcpip.h>
-#include <iphlpapi.h>
+#include <string>
 
 #pragma comment(lib, "Ws2_32.lib")
 
-#define PORT "3000" // Server port
-#define BUFLEN 1024
+#define PORT 3000 // Server port
+#define BUFLEN 4096
 
 int main() {
 	int iRes;
@@ -27,110 +22,85 @@ int main() {
 		return 1;
 	}
 
-	struct addrinfo* res = NULL, * ptr = NULL;
-	struct addrinfo hints;
-
-	ZeroMemory(&hints, sizeof(hints));
-	hints.ai_family = AF_INET;			// IPv4 addr family OR AF_INET6 for IPv6
-	hints.ai_socktype = SOCK_STREAM;	// Stream socket
-	hints.ai_protocol = IPPROTO_TCP;	// TCP protocol
-	hints.ai_flags = AI_PASSIVE;		// When set and nodename parameter to the getaddrinfo function is a NULL pointer
-	                                    // the IP address portion of the socket address structure is set to INADDR_ANY for IPv4 addresses
-										// IN6ADDR_ANY_INIT for IPv6 addresses.
-
-	iRes = getaddrinfo(NULL, PORT, &hints, &res); // Resolve the local address and port to be used by the server
-	if (iRes != 0) {
-		std::cout << "getaddrinfo failed: " << iRes << std::endl;
-		WSACleanup();
-		return 1;
-	}
-
 	// CREATE SOCKET
-	SOCKET ListenSocket = INVALID_SOCKET; // Socket listen for client connections
+	SOCKET listening = INVALID_SOCKET; // Socket listen for client connections
 	// If a server wants to listen on both IPv6and IPv4, two listen sockets must be created
 	// One for IPv6and one for IPv4. 
 	// These two sockets must be handled separately by the application.
 
-	ListenSocket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-	if (ListenSocket == INVALID_SOCKET) {
+	listening = socket(AF_INET, SOCK_STREAM, 0);
+	if (listening == INVALID_SOCKET) {
 		std::cout << "Error at socket(): " << WSAGetLastError() << std::endl;
-		freeaddrinfo(res);
 		WSACleanup();
 		return 1;
 	}
+
+	sockaddr_in hint;
+	hint.sin_family = AF_INET;
+	hint.sin_port = htons(PORT);	// Numbers are stored in memory in network byte order, which is with the most significant byte first.
+									// It will therefore swap the bytes making up the number so that in memory the bytes will be stored in the order.
+	hint.sin_addr.S_un.S_addr = INADDR_ANY;
+
 
 	// BINDING SOCKET TO IP ADDRESS AND PORT
-	iRes = bind(ListenSocket, res->ai_addr, (int) res->ai_addrlen);
+	iRes = bind(listening, (sockaddr*) &hint, sizeof(hint));
 	if (iRes == SOCKET_ERROR) {
 		std::cout << "Bind failed: " << WSAGetLastError() << std::endl;
-		freeaddrinfo(res);
-		closesocket(ListenSocket);
+		closesocket(listening);
 		WSACleanup();
 		return 1;
-	}
+	} else
+		std::cout << "Server started on PORT " << hint.sin_port << std::endl;
 
 	// LISTEN TO INCOMING REQUEST
-	iRes = listen(ListenSocket, SOMAXCONN);
+	iRes = listen(listening, SOMAXCONN);
 	if (iRes == SOCKET_ERROR) {
 		std::cout << "Listen failed: " << WSAGetLastError() << std::endl;
-		closesocket(ListenSocket);
+		closesocket(listening);
 		WSACleanup();
 		return 1;
 	}
 
-	// ACCEPT 1 CONNECTION
-	SOCKET ClientSocket;
-	ClientSocket = INVALID_SOCKET;
-	ClientSocket = accept(ListenSocket, NULL, NULL);
-	if (ClientSocket == INVALID_SOCKET) {
-		std::cout << "Accept failed: " << WSAGetLastError() << std::endl;
-		closesocket(ListenSocket);
-		WSACleanup();
-		return 1;
+	// WAIT FOR A CONNECTION
+	sockaddr_in client;
+	int clientSize = sizeof(client);
+	SOCKET clientSocket = accept(listening, (sockaddr*) &client, &clientSize);
+
+	char clientHost[NI_MAXHOST]; // Client's remote name
+	char clientPort[NI_MAXSERV]; // Client's port
+
+	ZeroMemory(clientHost, NI_MAXHOST);
+	ZeroMemory(clientPort, NI_MAXSERV);
+
+	if (getnameinfo((sockaddr*) &client, clientSize, clientHost, NI_MAXHOST, clientPort, NI_MAXSERV, 0) == 0)
+		std::cout << clientHost << " connected on PORT " << clientPort << std::endl;
+	else {
+		inet_ntop(AF_INET, &client.sin_addr, clientHost, NI_MAXHOST);
+		std::cout << clientHost << " connected on PORT " << ntohs(client.sin_port) << std::endl;
 	}
 
-	// RECEIVE AND SEND DATA
-	char recvBuf[BUFLEN];
-	int iSendRes;
-	int recvBuflen = BUFLEN;
+	closesocket(listening);
 
-	// Receive until client connection shut down
+	// ACCEPT CONNECTION AND ECHO MESSAGE
+	char buffer[BUFLEN];
 	while (true) {
-		iRes = recv(ClientSocket, recvBuf, recvBuflen, 0);
-		if (iRes > 0) {
-			std::cout << "Bytes received: " << iRes << std::endl;
-			// Echo the buffer back to the sender
-			iSendRes = send(ClientSocket, recvBuf, iRes, 0);
-			if (iSendRes == SOCKET_ERROR) {
-				std::cout << "Send failed: " << WSAGetLastError() << std::endl;
-				closesocket(ClientSocket);
-				WSACleanup();
-				return 1;
-			}
-			std::cout << "Bytes sent: " << iSendRes << std::endl;
-		} else if (iRes == 0)
-			std::cout << "Connection closing..." << std::endl;
-		else {
-			std::cout << "Recv failed: " << WSAGetLastError() << std::endl;
-			closesocket(ClientSocket);
-			WSACleanup();
-			return 1;
+		ZeroMemory(buffer, BUFLEN);
+		// Wait for client to send data
+		int bytesReceived = recv(clientSocket, buffer, BUFLEN, 0);
+		if (bytesReceived == 0) {
+			std::cout << "Client disconneted" << std::endl;
+			break;
+		} else if (bytesReceived == SOCKET_ERROR) {
+			std::cout << "Error in recv() " << WSAGetLastError() << std::endl;
+			break;
 		}
-		if (iRes <= 0) break;
-	}
-
-	// DISCONNECT SERVER
-	iRes = shutdown(ClientSocket, SD_SEND);
-	if (iRes == SOCKET_ERROR) {
-		std::cout << "Shutdown failed: " << WSAGetLastError() << std::endl;
-		closesocket(ClientSocket);
-		WSACleanup();
-		return 1;
+		std::cout << "Client: " << std::string(buffer, 0, bytesReceived) << std::endl;
+		send(clientSocket, buffer, bytesReceived + 1, 0); // Echo message back to client
 	}
 
 	// When the client is done receiving data, the closesocket function is called to close the socket.
 	// When the client is completed using the Windows Sockets DLL, the WSACleanup function is called to release resources.
-	closesocket(ClientSocket);
+	closesocket(clientSocket);
 	WSACleanup();
 	return 0;
 }
