@@ -7,7 +7,7 @@
 class TcpListener {
 	private:
 		int PORT;
-		SOCKET listening = INVALID_SOCKET;
+		SOCKET listeningSocket = INVALID_SOCKET;
 		sockaddr_in hint;
 		SOCKET clientSocket;
 

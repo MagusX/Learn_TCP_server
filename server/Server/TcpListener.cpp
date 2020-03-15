@@ -10,8 +10,8 @@ int TcpListener::initWS() {
 }
 
 SOCKET TcpListener::createSocket() {
-	listening = socket(AF_INET, SOCK_STREAM, 0);
-	return listening;
+	listeningSocket = socket(AF_INET, SOCK_STREAM, 0);
+	return listeningSocket;
 }
 
 int TcpListener::bindSocket() {
@@ -20,17 +20,18 @@ int TcpListener::bindSocket() {
 								 //It will therefore swap the bytes making up the number so that in memory the bytes will be stored in the order.
 	hint.sin_addr.S_un.S_addr = INADDR_ANY;
 
-	return bind(listening, (sockaddr*) &hint, sizeof(hint));
+	return bind(listeningSocket, (sockaddr*) &hint, sizeof(hint));
 }
 
 int TcpListener::listenConnection() {
-	return listen(listening, SOMAXCONN);
+	return listen(listeningSocket, SOMAXCONN);
 }
 
 void TcpListener::acceptConnection() {
 	sockaddr_in client;
 	int clientSize = sizeof(client);
-	clientSocket = accept(listening, (sockaddr*) &client, &clientSize);
+	// Wait for client to connect
+	clientSocket = accept(listeningSocket, (sockaddr*) &client, &clientSize);
 
 	char clientHost[NI_MAXHOST]; // Client's remote name
 	char clientPort[NI_MAXSERV]; // Client's port
@@ -45,7 +46,7 @@ void TcpListener::acceptConnection() {
 		std::cout << clientHost << " connected on PORT " << ntohs(client.sin_port) << std::endl;
 	}
 
-	closesocket(listening);
+	closesocket(listeningSocket);
 }
 
 void TcpListener::echoMessage() {
@@ -67,7 +68,7 @@ void TcpListener::echoMessage() {
 }
 
 void TcpListener::clearListenSocket() {
-	closesocket(listening);
+	closesocket(listeningSocket);
 	WSACleanup();
 }
 
@@ -94,7 +95,7 @@ void TcpListener::run() {
 		errMsg("Bind failed");
 		clearListenSocket();
 		return;
-	}
+	} else std::cout << "Server started on PORT " << PORT << std::endl;
 	if (listenConnection() == SOCKET_ERROR) {
 		errMsg("Listen failed");
 		clearListenSocket();
